@@ -53,7 +53,7 @@ type ConjurAuthResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-func NewClientFromRole() (ConjurAuthResponse, error) {
+func NewClientFromRole() (*ConjurAuthResponse, error) {
 
 	// Initialize response
 	var conjurClient ConjurAuthResponse
@@ -70,14 +70,14 @@ func NewClientFromRole() (ConjurAuthResponse, error) {
 	creds, err := svc.Retrieve(context.Background())
 	if err != nil {
 		conjurClient.Message = "Error retrieving credentials from EC2 Role Cred Service"
-		return conjurClient, err
+		return &conjurClient, err
 	}
 
 	// Generate STS Request
 	req, err := http.NewRequest("GET", ServiceUrl.String(), nil)
 	if err != nil {
 		conjurClient.Message = "Error generating STS Request"
-		return conjurClient, err
+		return &conjurClient, err
 	}
 
 	// Create Signer using aws-sdk-go-v2/aws/signer
@@ -88,7 +88,7 @@ func NewClientFromRole() (ConjurAuthResponse, error) {
 	})
 	if err != nil {
 		conjurClient.Message = "Error obtaining signature from Signer"
-		return conjurClient, err
+		return &conjurClient, err
 	}
 
 	// Create JSON from signer response header
@@ -101,14 +101,14 @@ func NewClientFromRole() (ConjurAuthResponse, error) {
 	payload, err := json.Marshal(signerPayload)
 	if err != nil {
 		conjurClient.Message = "Error creating payload body from Signer Response"
-		return conjurClient, err
+		return &conjurClient, err
 	}
 
 	// Declare / Read in Conjur Information
 	conjur := ConjurDetails{}
 	if err := env.Set(&conjur); err != nil {
 		conjurClient.Message = "Error obtaining Conjur Details"
-		return conjurClient, err
+		return &conjurClient, err
 	}
 
 	// Ensure Conjur Details are available and the fields aren't empty
@@ -116,7 +116,7 @@ func NewClientFromRole() (ConjurAuthResponse, error) {
 	for i := 0; i < v.NumField(); i++ {
 		if v.Field(i).Interface() == "" {
 			conjurClient.Message = "Conjur Environment Variable not set"
-			return conjurClient, nil
+			return &conjurClient, nil
 		}
 	}
 
@@ -128,7 +128,7 @@ func NewClientFromRole() (ConjurAuthResponse, error) {
 	conjurReq, err := http.NewRequest("POST", authUrl, bytes.NewBuffer(payload))
 	if err != nil {
 		conjurClient.Message = "Error generating the conjur client request"
-		return conjurClient, err
+		return &conjurClient, err
 	}
 	conjurReq.Header.Add("Content-Type", "text/plain")
 	conjurReq.Header.Add("Accept", "*/*")
@@ -136,20 +136,20 @@ func NewClientFromRole() (ConjurAuthResponse, error) {
 	resp, err := client.Do(conjurReq)
 	if err != nil {
 		conjurClient.Message = "No response from Conjur Host"
-		return conjurClient, err
+		return &conjurClient, err
 	} else if resp.StatusCode == 401 || resp.StatusCode == 404 {
 		conjurClient.Message = resp.Status
-		return conjurClient, nil
+		return &conjurClient, nil
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		conjurClient.Message = "Unable to read Conjur Response Body"
-		return conjurClient, err
+		return &conjurClient, err
 	}
 
 	json.Unmarshal([]byte(respBytes), &conjurClient)
 
-	return conjurClient, nil
+	return &conjurClient, nil
 }
