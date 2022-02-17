@@ -53,15 +53,15 @@ var (
 // Parameters specify the Credential Generation IamAuthMethodod as well as specific Conjur
 // Details.
 // type ConjurParams struct {
-// 		IamAuthMethodod       string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile" (Required)
-//		Profile      string // AWS Profile (e.g. Default) (Required for Profile)
-// 		RoleArn      string // AWS Role ARN (Required for assumeRole)
-//		Session      string // AWS Assume Role Session Name (Required for assumeRole)
-//		AccessKey    string // AWS Access Key (Required for static)
-//		SecretKey    string // AWS Secret Key (Required for static)
-//		SessionToken string // AWS Session Token (Optional for static)
-//		HostId       string // Host to Authenticate as e.g. host/policy/prefix/id (Required)
-//		ServiceId    string // Authentication Service e.g. prod (Required)
+// 		IamAuthMethodod     string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile" (Required)
+//		Profile      		string // AWS Profile (e.g. Default) (Required for Profile)
+// 		RoleArn      		string // AWS Role ARN (Required for assumeRole)
+//		Session      		string // AWS Assume Role Session Name (Required for assumeRole)
+//		AccessKey    		string // AWS Access Key (Required for static)
+//		SecretKey    		string // AWS Secret Key (Required for static)
+//		SessionToken 		string // AWS Session Token (Optional for static)
+//		HostId       		string // Host to Authenticate as e.g. host/policy/prefix/id (Required)
+//		ServiceId    		string // Authentication Service e.g. prod (Required)
 //	}
 func NewConjurIamClient(params ConjurParams) (*conjurapi.Client, error) {
 	if params.IamAuthMethod == "" || params.HostId == "" || params.ServiceId == "" {
@@ -221,7 +221,9 @@ func GetIAMProfileMetadata(params ConjurParams) (*aws.Credentials, error) {
 	// Initial credentials loaded from SDK's default credential chain. Such as
 	// the environment, shared credentials (~/.aws/credentials), or EC2 Instance
 	// Role.
-	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithSharedConfigProfile(params.Profile))
+	cfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithSharedConfigProfile(params.Profile),
+		config.WithRegion(region))
 	if err != nil {
 		panic(err)
 	}
