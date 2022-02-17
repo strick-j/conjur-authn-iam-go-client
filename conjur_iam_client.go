@@ -49,17 +49,28 @@ var (
 	region            string = "us-east-1" // Region must be us-east-1 for the IAM Service Call
 )
 
-// NewClientFromRole returns a Conjur Client () based on AWS Role provided
-// Requires ConjurDetails - HostId (e.g. host/policy/prefix/id) and ServiceId (e.g. Prod)
-func NewClientFromRole(params ConjurParams) (*conjurapi.Client, error) {
-	// Load Conjur Config - Checks .netrc, .conjurrc, and Environment Variables
-	cfg, err := conjurapi.LoadConfig()
-	if err != nil {
-		panic(err)
+// NewClientIamClient requires a struct containing ConjurParameters.
+// Parameters specify the Credential Generation IamAuthMethodod as well as specific Conjur
+// Details.
+// type ConjurParams struct {
+// 		IamAuthMethodod       string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile" (Required)
+//		Profile      string // AWS Profile (e.g. Default) (Required for Profile)
+// 		RoleArn      string // AWS Role ARN (Required for assumeRole)
+//		Session      string // AWS Assume Role Session Name (Required for assumeRole)
+//		AccessKey    string // AWS Access Key (Required for static)
+//		SecretKey    string // AWS Secret Key (Required for static)
+//		SessionToken string // AWS Session Token (Optional for static)
+//		HostId       string // Host to Authenticate as e.g. host/policy/prefix/id (Required)
+//		ServiceId    string // Authentication Service e.g. prod (Required)
+//	}
+func NewConjurIamClient(params ConjurParams) (*conjurapi.Client, error) {
+	if params.IamAuthMethod == "" || params.HostId == "" || params.ServiceId == "" {
+		err := fmt.Errorf("Required parameter not provided. IamAuthMethodod, HostId, and ServiceId are required.")
+		return nil, err
 	}
 
-	// Obtain Credentials based on IAM Role Information
-	credentials, err := GetIAMEC2RoleMetadata(params)
+	// Obtain AWS based on context provided
+	credentials, err := GetAwsCredentials(params)
 	if err != nil {
 		fmt.Printf("Error: %s", err)
 		panic(err)
@@ -69,6 +80,12 @@ func NewClientFromRole(params ConjurParams) (*conjurapi.Client, error) {
 	sigV4Payload, err := NewTokenFromIAM(*credentials)
 	if err != nil {
 		fmt.Printf("Error: %s", err)
+		panic(err)
+	}
+
+	// Load Conjur Config - Checks .netrc, .conjurrc, and Environment Variables
+	cfg, err := conjurapi.LoadConfig()
+	if err != nil {
 		panic(err)
 	}
 
@@ -130,63 +147,6 @@ func GetAwsCredentials(params ConjurParams) (*aws.Credentials, error) {
 	}
 }
 
-// NewClientIamClient requires a struct containing ConjurParameters.
-// Parameters specify the Credential Generation IamAuthMethodod as well as specific Conjur
-// Details.
-// type ConjurParams struct {
-// 		IamAuthMethodod       string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile" (Required)
-//		Profile      string // AWS Profile (e.g. Default) (Required for Profile)
-// 		RoleArn      string // AWS Role ARN (Required for assumeRole)
-//		Session      string // AWS Assume Role Session Name (Required for assumeRole)
-//		AccessKey    string // AWS Access Key (Required for static)
-//		SecretKey    string // AWS Secret Key (Required for static)
-//		SessionToken string // AWS Session Token (Optional for static)
-//		HostId       string // Host to Authenticate as e.g. host/policy/prefix/id (Required)
-//		ServiceId    string // Authentication Service e.g. prod (Required)
-//	}
-func NewConjurIamClient(params ConjurParams) (*conjurapi.Client, error) {
-	if params.IamAuthMethod == "" || params.HostId == "" || params.ServiceId == "" {
-		err := fmt.Errorf("Required parameter not provided. IamAuthMethodod, HostId, and ServiceId are required.")
-		return nil, err
-	}
-
-	// Obtain AWS based on context provided
-	credentials, err := GetAwsCredentials(params)
-	if err != nil {
-		fmt.Printf("Error: %s", err)
-		panic(err)
-	}
-
-	// Get AWS Signature Version 4 signing token based on IAM Role
-	sigV4Payload, err := NewTokenFromIAM(*credentials)
-	if err != nil {
-		fmt.Printf("Error: %s", err)
-		panic(err)
-	}
-
-	// Load Conjur Config - Checks .netrc, .conjurrc, and Environment Variables
-	cfg, err := conjurapi.LoadConfig()
-	if err != nil {
-		panic(err)
-	}
-
-	// Get Conjur Authentication Token
-	conjurSessionToken, err := GetConjurIAMSessionToken(*sigV4Payload, cfg, params)
-	if err != nil {
-		fmt.Printf("Error: %s", err)
-		panic(err)
-	}
-
-	// Create Conjur Client from Authentication Token and Config
-	conjurClient, err := conjurapi.NewClientFromToken(cfg, string(conjurSessionToken.Raw()))
-	if err != nil {
-		fmt.Printf("Error: %s", err)
-		panic(err)
-	}
-
-	return conjurClient, nil
-}
-
 // GetIAMEC2RoleMetadata obtains AWS credentials from an EC2 Host IAM
 // Role. If no role is assigned an error is returned.
 func GetIAMEC2RoleMetadata(params ConjurParams) (*aws.Credentials, error) {
@@ -213,7 +173,7 @@ func GetIAMAssumedRoleMetadata(params ConjurParams) (*aws.Credentials, error) {
 	// Initial credentials loaded from SDK's default credential chain. Such as
 	// the environment, shared credentials (~/.aws/credentials), or EC2 Instance
 	// Role. These credentials will be used to to make the STS Assume Role API.
-	cfg, err := config.LoadDefaultConfig(context.Background())
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
 	if err != nil {
 		panic(err)
 	}
