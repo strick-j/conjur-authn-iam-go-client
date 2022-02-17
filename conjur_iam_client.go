@@ -116,16 +116,29 @@ func NewConjurIamClient(params ConjurParams) (*conjurapi.Client, error) {
 func GetAwsCredentials(params ConjurParams) (*aws.Credentials, error) {
 	switch strings.ToLower(params.IamAuthMethod) {
 	case "static":
-		// Do SoIamAuthMethoding
-		credentials, err := GetIAMStaticMetadata(params)
+		// UPDATE TODO
+		cfg, err := config.LoadDefaultConfig(context.Background(),
+			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(params.AccessKey, params.SecretKey, params.SessionToken)),
+			config.WithRegion(region))
+		if err != nil {
+			panic(err)
+		}
+		credentials, err := GetIAMAssumedRoleMetadata(params, cfg)
 		if err != nil {
 			fmt.Printf("Error: %s", err)
 			panic(err)
 		}
 		return credentials, nil
 	case "assumerole":
-		// Obtain Credentials based on default credentials and provided role to assume
-		credentials, err := GetIAMAssumedRoleMetadata(params)
+		// Initial credentials loaded from SDK's default credential chain. Such as
+		// the environment, shared credentials (~/.aws/credentials), or EC2 Instance
+		// Role. These credentials will be used to to make the STS Assume Role API.
+		cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
+		if err != nil {
+			panic(err)
+		}
+		// Obtain Credentials based on loaded config
+		credentials, err := GetIAMAssumedRoleMetadata(params, cfg)
 		if err != nil {
 			fmt.Printf("Error: %s", err)
 			panic(err)
@@ -140,8 +153,15 @@ func GetAwsCredentials(params ConjurParams) (*aws.Credentials, error) {
 		}
 		return credentials, nil
 	case "profile":
-		// Obtain Credentials based on IAM Role Information
-		credentials, err := GetIAMProfileMetadata(params)
+		// Comment here
+		cfg, err := config.LoadDefaultConfig(context.Background(),
+			config.WithSharedConfigProfile(params.Profile),
+			config.WithRegion(region))
+		if err != nil {
+			panic(err)
+		}
+		// Obtain Credentials based on provided profile. Assume Role.
+		credentials, err := GetIAMAssumedRoleMetadata(params, cfg)
 		if err != nil {
 			fmt.Printf("Error: %s", err)
 			panic(err)
@@ -152,18 +172,6 @@ func GetAwsCredentials(params ConjurParams) (*aws.Credentials, error) {
 		err := fmt.Errorf("error: no IamAuthMethodod parameter provided")
 		return nil, err
 	}
-}
-
-// TakeRole gets temporary security credentials to access resources.
-// Inputs:
-//     c is the context of the method call, which includes the AWS Region.
-//     api is the interface that defines the method call.
-//     input defines the input arguments to the service call.
-// Output:
-//     If successful, an AssumeRoleOutput object containing the result of the service call and nil.
-//     Otherwise, nil and an error from the call to AssumeRole.
-func TakeRole(c context.Context, api STSAssumeRoleAPI, input *sts.AssumeRoleInput) (*sts.AssumeRoleOutput, error) {
-	return api.AssumeRole(c, input)
 }
 
 // GetIAMEC2RoleMetadata obtains AWS credentials from an EC2 Host IAM
@@ -188,15 +196,7 @@ func GetIAMEC2RoleMetadata(params ConjurParams) (*aws.Credentials, error) {
 
 // GetAssumedRoleMetadata obtiains AWS credentials based on initial AWS credentials
 // that are used to assume a role
-func GetIAMAssumedRoleMetadata(params ConjurParams) (*aws.Credentials, error) {
-	// Initial credentials loaded from SDK's default credential chain. Such as
-	// the environment, shared credentials (~/.aws/credentials), or EC2 Instance
-	// Role. These credentials will be used to to make the STS Assume Role API.
-	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
-	if err != nil {
-		panic(err)
-	}
-
+func GetIAMAssumedRoleMetadata(params ConjurParams, cfg aws.Config) (*aws.Credentials, error) {
 	// Create the credentials from AssumeRoleProvider to assume the role
 	// referenced by the "myRoleARN" ARN.
 	provider := sts.NewFromConfig(cfg, func(options *sts.Options) {
