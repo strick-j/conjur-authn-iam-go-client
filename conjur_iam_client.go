@@ -65,8 +65,8 @@ var (
 //	}
 func NewConjurIamClient(params ConjurParams) (*conjurapi.Client, error) {
 	if params.IamAuthMethod == "" || params.HostId == "" || params.ServiceId == "" {
-		err := fmt.Errorf("Required parameter not provided. IamAuthMethodod, HostId, and ServiceId are required.")
-		return nil, err
+		err := fmt.Errorf("required parameter not provided - IamAuthMethod, HostId, and ServiceId are required")
+		panic(err)
 	}
 
 	// Obtain AWS based on context provided
@@ -310,10 +310,10 @@ func GetConjurIAMSessionToken(conjurAuthPayload Sigv4Payload, cfg conjurapi.Conf
 
 	resp, err := client.Do(conjurReq)
 	if err != nil {
-		fmt.Errorf("no response from Conjur Host")
+		err = fmt.Errorf("no response from Conjur Host")
 		return nil, err
 	} else if resp.StatusCode == 401 || resp.StatusCode == 404 {
-		err = fmt.Errorf("error 404 or 401: ", resp.Status)
+		err = fmt.Errorf("error 404 or 401: %s", resp.Status)
 		return nil, err
 	}
 	defer resp.Body.Close()
