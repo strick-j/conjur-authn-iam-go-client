@@ -31,15 +31,22 @@ type Sigv4Payload struct {
 }
 
 type ConjurParams struct {
-	IamAuthMethod string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile"
-	Profile       string // AWS Profile (e.g. Default)
-	RoleArn       string // AWS Role ARN (required for assumeRole)
-	Session       string // AWS Assume Role Session Name (required for assumeRole)
-	AccessKey     string // AWS Access Key (Required for static)
-	SecretKey     string // AWS Secret Key (Required for static)
-	SessionToken  string // AWS Session Token (Optional for static)
-	HostId        string // Host to Authenticate as e.g. host/policy/prefix/id
-	ServiceId     string // Authentication Service e.g. prod
+	IamAuthMethod   string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile"
+	Profile         string // AWS Profile (e.g. Default)
+	RoleArn         string // AWS Role ARN (required for assumeRole)
+	RoleSessionName string // AWS Assume Role Session Name (required for assumeRole)
+	AccessKey       string // AWS Access Key (Required for static)
+	SecretKey       string // AWS Secret Key (Required for static)
+	SessionToken    string // AWS Session Token (Optional for static)
+	HostId          string // Host to Authenticate as e.g. host/policy/prefix/id
+	ServiceId       string // Authentication Service e.g. prod
+}
+
+// STSAssumeRoleAPI defines the interface for the AssumeRole function.
+type STSAssumeRoleAPI interface {
+	AssumeRole(ctx context.Context,
+		params *sts.AssumeRoleInput,
+		optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error)
 }
 
 // Set defaults as required by the aws-sdk-go-v2 package to obtain a Signed Token
@@ -53,7 +60,7 @@ var (
 // Parameters specify the Credential Generation IamAuthMethodod as well as specific Conjur
 // Details.
 // type ConjurParams struct {
-// 		IamAuthMethodod     string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile" (Required)
+// 		IamAuthMethod       string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile" (Required)
 //		Profile      		string // AWS Profile (e.g. Default) (Required for Profile)
 // 		RoleArn      		string // AWS Role ARN (Required for assumeRole)
 //		Session      		string // AWS Assume Role Session Name (Required for assumeRole)
@@ -147,6 +154,18 @@ func GetAwsCredentials(params ConjurParams) (*aws.Credentials, error) {
 	}
 }
 
+// TakeRole gets temporary security credentials to access resources.
+// Inputs:
+//     c is the context of the method call, which includes the AWS Region.
+//     api is the interface that defines the method call.
+//     input defines the input arguments to the service call.
+// Output:
+//     If successful, an AssumeRoleOutput object containing the result of the service call and nil.
+//     Otherwise, nil and an error from the call to AssumeRole.
+func TakeRole(c context.Context, api STSAssumeRoleAPI, input *sts.AssumeRoleInput) (*sts.AssumeRoleOutput, error) {
+	return api.AssumeRole(c, input)
+}
+
 // GetIAMEC2RoleMetadata obtains AWS credentials from an EC2 Host IAM
 // Role. If no role is assigned an error is returned.
 func GetIAMEC2RoleMetadata(params ConjurParams) (*aws.Credentials, error) {
@@ -160,7 +179,7 @@ func GetIAMEC2RoleMetadata(params ConjurParams) (*aws.Credentials, error) {
 	// Retrieve retrieves credentials from the EC2 service.
 	credentials, err := provider.Retrieve(context.Background())
 	if err != nil {
-		err = fmt.Errorf("enable to derive credentials from EC2 Role. Error: %s", err)
+		err = fmt.Errorf("unable to derive credentials from EC2 Role. Error: %s", err)
 		return nil, err
 	}
 
@@ -233,6 +252,7 @@ func GetIAMProfileMetadata(params ConjurParams) (*aws.Credentials, error) {
 	provider := sts.NewFromConfig(cfg, func(options *sts.Options) {
 		config.WithRegion(region)
 	})
+
 	creds := stscreds.NewAssumeRoleProvider(provider, params.RoleArn)
 
 	// Retrieve retrieves a set of temporary credentials for the assumed role
