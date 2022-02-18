@@ -72,7 +72,7 @@ var (
 func (p ConjurIamParams) NewConjurIamClient() (*conjurapi.Client, error) {
 	// Validate IAM Authentication Method is present
 	if p.IamAuthMethod == "" {
-		panic(fmt.Errorf("required parameter not provided - IamAuthMethod, HostId, and ServiceId are required"))
+		panic(fmt.Errorf("required parameter not provided - IamAuthMethod, HostId, and ServiceId are required\n"))
 	}
 
 	// Load Conjur Config - Checks .netrc, .conjurrc, and Environment Variables
@@ -117,7 +117,7 @@ func authnVarsValidate(cfg conjurapi.Config) (*authnVars, error) {
 	// Obtain Conjur authn-iam Service ID -
 	authnIamServiceID := os.Getenv("CONJUR_AUTHN_IAM_SERVICE_ID")
 	if authnIamServiceID == "" {
-		return nil, fmt.Errorf("environment Variable for CONJUR_AUTHN_IAM_SERVICE_ID not found")
+		return nil, fmt.Errorf("environment Variable for CONJUR_AUTHN_IAM_SERVICE_ID not found\n")
 	}
 
 	// Retrieve Conjur Login from Env or .Netrc
@@ -127,7 +127,7 @@ func authnVarsValidate(cfg conjurapi.Config) (*authnVars, error) {
 	} else if loginPair, err := conjurapi.LoginPairFromNetRC(cfg); err == nil && loginPair.Login != "" {
 		login = loginPair.Login
 	} else {
-		return nil, fmt.Errorf("unable to detect Conjur Login Identity (e.g. host/policy/prefix/id)")
+		return nil, fmt.Errorf("unable to detect Conjur Login Identity (e.g. host/policy/prefix/id)\n")
 	}
 
 	authnVars := authnVars{
