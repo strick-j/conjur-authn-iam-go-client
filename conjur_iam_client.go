@@ -72,7 +72,7 @@ var (
 func (p ConjurIamParams) NewConjurIamClient() (*conjurapi.Client, error) {
 	// Validate IAM Authentication Method is present
 	if p.IamAuthMethod == "" {
-		panic(fmt.Errorf("required parameter not provided - IamAuthMethod, HostId, and ServiceId are required\n"))
+		panic(fmt.Errorf("required parameter not provided - IamAuthMethod, HostId, and ServiceId are required"))
 	}
 
 	// Load Conjur Config - Checks .netrc, .conjurrc, and Environment Variables
@@ -117,7 +117,7 @@ func authnVarsValidate(cfg conjurapi.Config) (*authnVars, error) {
 	// Obtain Conjur authn-iam Service ID -
 	authnIamServiceID := os.Getenv("CONJUR_AUTHN_IAM_SERVICE_ID")
 	if authnIamServiceID == "" {
-		return nil, fmt.Errorf("environment Variable for CONJUR_AUTHN_IAM_SERVICE_ID not found\n")
+		return nil, fmt.Errorf("environment Variable for CONJUR_AUTHN_IAM_SERVICE_ID not found")
 	}
 
 	// Retrieve Conjur Login from Env or .Netrc
@@ -127,9 +127,10 @@ func authnVarsValidate(cfg conjurapi.Config) (*authnVars, error) {
 	} else if loginPair, err := conjurapi.LoginPairFromNetRC(cfg); err == nil && loginPair.Login != "" {
 		login = loginPair.Login
 	} else {
-		return nil, fmt.Errorf("unable to detect Conjur Login Identity (e.g. host/policy/prefix/id)\n")
+		return nil, fmt.Errorf("unable to detect Conjur Login Identity (e.g. host/policy/prefix/id)")
 	}
 
+	// Populate struct with variables required for the authn-iam URL
 	authnVars := authnVars{
 		conjurLogin:     login,
 		conjurServiceId: authnIamServiceID,
@@ -185,7 +186,7 @@ func getAwsCredentials(p ConjurIamParams) (*aws.Credentials, error) {
 		// Retrieve temporary credentials for the assumed role
 		credentials, err := provider.Retrieve(context.Background())
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		return &credentials, nil
@@ -218,21 +219,23 @@ func (p *ConjurIamParams) getAwsConfig() (*aws.Config, error) {
 		// Role. These credentials will be used to to make the STS Assume Role API.
 		cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		return &cfg, nil
 	case "profile":
+		if p.Profile == "" {
+			return nil, fmt.Errorf("recieved profile method for IAM Role Assumption but did not recieve Profile name")
+		}
 		// Use provided profile to generate AWS Config
 		cfg, err := config.LoadDefaultConfig(context.Background(),
 			config.WithSharedConfigProfile(p.Profile),
 			config.WithRegion(region))
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		return &cfg, nil
 	}
-	err := fmt.Errorf("invalid parameters")
-	return nil, err
+	return nil, fmt.Errorf("invalid parameters")
 }
 
 // newTokenFromIAM takes AWS credentials (Access Key ID, Secret Key ID, and Session Token)
@@ -252,8 +255,7 @@ func newTokenFromIAM(credentials aws.Credentials) (*Sigv4Payload, error) {
 	// Generate STS Request
 	req, err := http.NewRequest("GET", ServiceUrl.String(), nil)
 	if err != nil {
-		err = fmt.Errorf("error Generating STS Request : %s", err)
-		return nil, err
+		return nil, fmt.Errorf("error Generating STS Request : %s", err)
 	}
 
 	// Create Signer using aws-sdk-go-v2/aws/signer with blank payload
@@ -263,8 +265,7 @@ func newTokenFromIAM(credentials aws.Credentials) (*Sigv4Payload, error) {
 		o.LogSigning = true
 	})
 	if err != nil {
-		err = fmt.Errorf("unable to create AWS sigv4 Signer : %s", err)
-		return nil, err
+		return nil, fmt.Errorf("unable to create AWS sigv4 Signer : %s", err)
 	}
 
 	// Create JSON from signer response header
