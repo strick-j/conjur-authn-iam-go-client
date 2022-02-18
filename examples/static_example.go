@@ -30,18 +30,18 @@ import (
 func StaticAuthSecretRetrieve() {
 	variableId := "policy/path/variable-id"
 
-	// Required Parameters for static method
-	// IamAuthMethod, AccessKey, SecretKey, RoleArn
+	// IamAuthMethod: "static"
+	// Required Parameters: IamAuthMethod, AccessKey, SecretKey, RoleArn
 	p := &conjurIamClient.ConjurIamParams{
 		IamAuthMethod: "static",
-		AccessKey: "<AWS_ACCESS_KEY_ID>", // Required
-		SecretKey: "<AWS_SECRET_KEY_ID>", // Required
-		SessionToken: "z,AWS_SESSION_TOKEN>", // Optional
-		RoleArn:  "arn:aws:iam::<aws account number>:role/<aws role name>", // Required
+		AccessKey:     "<AWS_ACCESS_KEY_ID>",                                    // Required
+		SecretKey:     "<AWS_SECRET_KEY_ID>",                                    // Required
+		SessionToken:  "<AWS_SESSION_TOKEN>",                                    // Optional
+		RoleArn:       "arn:aws:iam::<AWS_ACCOUNT_NUMBER>:role/<AWS_ROLE_NAME>", // Required
 	}
 
-	// Retrieve Conjur Client based on IAM Role assumed using 
-	// statically
+	// Retrieve Conjur Client based on IAM Role assumed using
+	// statically provided credentials.
 	// If successful returns Conjur IAM Client, else returns error
 	conjurClient, err := p.NewConjurIamClient()
 	if err != nil {

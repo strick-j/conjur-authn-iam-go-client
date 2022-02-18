@@ -43,6 +43,11 @@ type ConjurIamParams struct {
 	SessionToken    string // AWS Session Token (Optional for static)
 }
 
+type authnVars struct {
+	conjurLogin     string // Login for Conjur authn-iam URL Generation (e.g. host/policy/prefix/id)
+	conjurServiceId string // Service ID for Conjur authn-iam URL Generation (e.g. default, prod, etc..)
+}
+
 type routerURL string
 
 // Set defaults as required by the aws-sdk-go-v2 package to obtain a Signed Token
@@ -70,6 +75,18 @@ func (p ConjurIamParams) NewConjurIamClient() (*conjurapi.Client, error) {
 		panic(fmt.Errorf("required parameter not provided - IamAuthMethod, HostId, and ServiceId are required"))
 	}
 
+	// Load Conjur Config - Checks .netrc, .conjurrc, and Environment Variables
+	cfg, err := conjurapi.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate Conjur Service ID and Login are present
+	authnVariables, err := authnVarsValidate(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	// Obtain AWS based on context provided
 	credentials, err := getAwsCredentials(p)
 	if err != nil {
@@ -82,14 +99,8 @@ func (p ConjurIamParams) NewConjurIamClient() (*conjurapi.Client, error) {
 		return nil, err
 	}
 
-	// Load Conjur Config - Checks .netrc, .conjurrc, and Environment Variables
-	cfg, err := conjurapi.LoadConfig()
-	if err != nil {
-		return nil, err
-	}
-
 	// Get Conjur Authentication Token
-	authnToken, err := getConjurIAMSessionToken(*sigV4Payload, cfg)
+	authnToken, err := getConjurIAMSessionToken(*sigV4Payload, cfg, *authnVariables)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +112,30 @@ func (p ConjurIamParams) NewConjurIamClient() (*conjurapi.Client, error) {
 	}
 
 	return conjurClient, nil
+}
+func authnVarsValidate(cfg conjurapi.Config) (*authnVars, error) {
+	// Obtain Conjur authn-iam Service ID -
+	authnIamServiceID := os.Getenv("CONJUR_AUTHN_IAM_SERVICE_ID")
+	if authnIamServiceID == "" {
+		return nil, fmt.Errorf("environment Variable for CONJUR_AUTHN_IAM_SERVICE_ID not found")
+	}
+
+	// Retrieve Conjur Login from Env or .Netrc
+	var login string
+	if loginPair, err := conjurapi.LoginPairFromEnv(); err == nil && loginPair.Login != "" {
+		login = loginPair.Login
+	} else if loginPair, err := conjurapi.LoginPairFromNetRC(cfg); err == nil && loginPair.Login != "" {
+		login = loginPair.Login
+	} else {
+		return nil, fmt.Errorf("unable to detect Conjur Login Identity (e.g. host/policy/prefix/id)")
+	}
+
+	authnVars := authnVars{
+		conjurLogin:     login,
+		conjurServiceId: authnIamServiceID,
+	}
+
+	return &authnVars, nil
 }
 
 func getAwsCredentials(p ConjurIamParams) (*aws.Credentials, error) {
@@ -169,7 +204,7 @@ func (p *ConjurIamParams) getAwsConfig() (*aws.Config, error) {
 		if p.AccessKey == "" || p.SecretKey == "" {
 			return nil, fmt.Errorf("recieved static method for IAM Role Assumption but did not recieve AccessKey or SecretKey")
 		}
-		// Returns AWS Configuration based on provided static credentials
+		// Use provided static credentials to generate AWS Conig
 		cfg, err := config.LoadDefaultConfig(context.Background(),
 			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(p.AccessKey, p.SecretKey, p.SessionToken)),
 			config.WithRegion(region))
@@ -187,7 +222,7 @@ func (p *ConjurIamParams) getAwsConfig() (*aws.Config, error) {
 		}
 		return &cfg, nil
 	case "profile":
-		// Comment here
+		// Use provided profile to generate AWS Config
 		cfg, err := config.LoadDefaultConfig(context.Background(),
 			config.WithSharedConfigProfile(p.Profile),
 			config.WithRegion(region))
@@ -246,31 +281,15 @@ func newTokenFromIAM(credentials aws.Credentials) (*Sigv4Payload, error) {
 
 // getConjurIAMSessionToken utilizes the Sigv4Payload as the the body to authenticate
 // via the authn-iam Conjur Authenticator
-func getConjurIAMSessionToken(conjurAuthPayload Sigv4Payload, cfg conjurapi.Config) (authn.AuthnToken, error) {
+func getConjurIAMSessionToken(conjurAuthPayload Sigv4Payload, cfg conjurapi.Config, av authnVars) (authn.AuthnToken, error) {
 	// Create Conjur authn-iam payload from AWS Signature v4 Signer
 	payload, err := json.Marshal(conjurAuthPayload)
 	if err != nil {
 		return nil, err
 	}
 
-	// Obtain Conjur authn-iam Service ID -
-	authnIamServiceID := os.Getenv("CONJUR_AUTHN_IAM_SERVICE_ID")
-	if authnIamServiceID == "" {
-		return nil, fmt.Errorf("environment Variable for CONJUR_AUTHN_IAM_SERVICE_ID not found")
-	}
-
-	// Retrieve Conjur Login from Env or .Netrc
-	var login string
-	if loginPair, err := conjurapi.LoginPairFromEnv(); err == nil && loginPair.Login != "" {
-		login = loginPair.Login
-	} else if loginPair, err := conjurapi.LoginPairFromNetRC(cfg); err == nil && loginPair.Login != "" {
-		login = loginPair.Login
-	} else {
-		return nil, fmt.Errorf("unable to detect Conjur Login Identity (e.g. host/policy/prefix/id)")
-	}
-
 	// Build Conjur URL (Path Escape required on HOST ID to convert / to %2F)
-	authnIamUrl := makeRouterURL(cfg.ApplianceURL, "authn-iam", authnIamServiceID, cfg.Account, url.PathEscape(login), "authenticate").String()
+	authnIamUrl := makeRouterURL(cfg.ApplianceURL, "authn-iam", av.conjurServiceId, cfg.Account, url.PathEscape(av.conjurLogin), "authenticate").String()
 
 	// Generate Conjur Client
 	var httpClient *http.Client

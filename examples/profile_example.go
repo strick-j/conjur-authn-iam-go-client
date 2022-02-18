@@ -32,17 +32,17 @@ import (
 func ProfileAuthSecretRetrieve() {
 	variableId := "policy/path/variable-id"
 
-	// Required Parameters for static method
-	// IamAuthMethod, AccessKey, SecretKey, RoleArn
+	// IamAuthMethod: "profile"
+	// Required Parameters: IamAuthMethod, Profile, RoleArn
 	p := &conjurIamClient.ConjurIamParams{
-		IamAuthMethod: "static",
-		AccessKey: "<AWS_ACCESS_KEY_ID>", // Required
-		SecretKey: "<AWS_SECRET_KEY_ID>", // Required
-		SessionToken: "z,AWS_SESSION_TOKEN>", // Optional
-		RoleArn:  "arn:aws:iam::<aws account number>:role/<aws role name>", // Required
+		IamAuthMethod: "profile",
+		Profile:       "<AWS_PROFILE_NAME>",                                     // Required - e.g. Default, Developers, Interactive, etc...
+		RoleArn:       "arn:aws:iam::<AWS_ACCOUNT_NUMBER>:role/<AWS_ROLE_NAME>", // Required
 	}
 
-	// Retrieve Conjur Client based on IAM Role
+	// Retrieve Conjur Client based on IAM Role assumed using
+	// specified AWS Profile.
+	// If successful returns Conjur IAM Client, else returns error
 	conjurClient, err := p.NewConjurIamClient()
 	if err != nil {
 		fmt.Printf("error creating client : %s", err)

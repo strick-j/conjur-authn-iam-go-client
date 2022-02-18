@@ -1,9 +1,9 @@
 // IAM Authentication Method - "ec2role"
 //
 // "ec2role" requires requires the ec2 host to have an IAM
-// role assigned. 
+// role assigned.
 //
-// The aws-sdk-go-v2/credentials/ec2rolecreds package to 
+// The aws-sdk-go-v2/credentials/ec2rolecreds package to
 // create an EC2 IMDS Provider. The EC2 IMDS provider
 // is used to obtain temporary AWS Credentials which are
 // used by the aws-sdk-go-v2/services/signer/v4 package to
@@ -22,12 +22,15 @@ import (
 func Ec2RoleAuthSecretRetrieve() {
 	variableId := "policy/path/variable-id"
 
-	
+	// IamAuthMethod: "ec2role"
+	// Required Parameters: IamAuthMethod
 	p := &conjurIamClient.ConjurIamParams{
 		IamAuthMethod: "ec2role",
 	}
 
-	// Retrieve Conjur Client based on IAM Role
+	// Retrieve Conjur Client based on IAM Role assigned to
+	// the ec2host.
+	// If successful returns Conjur IAM Client, else returns error
 	conjurClient, err := p.NewConjurIamClient()
 	if err != nil {
 		fmt.Printf("error creating client : %s", err)

@@ -37,7 +37,7 @@ func AssumeRoleAuthSecretRetrieve() {
 	// Required Parameters: IamAuthMethod, RoleArn
 	p := &conjurIamClient.ConjurIamParams{
 		IamAuthMethod: "assumerole",
-		RoleArn:       "arn:aws:iam::<aws account number>:role/<aws role name>", // Required
+		RoleArn:       "arn:aws:iam::<AWS_ACCOUNT_NUMBER>:role/<AWS_ROLE_NAME>", // Required
 	}
 
 	// Retrieve Conjur Client based on IAM Role assumed using
