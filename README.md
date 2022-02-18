@@ -4,7 +4,7 @@ A Golang package for generating a Conjur Client based via the [authn-iam authent
 
 ## Installation
 ```
-go get -u ggithub.com/strick-j/conjur-authn-iam-go-client
+go get -u github.com/strick-j/conjur-authn-iam-go-client
 ```
 
 ## Usage
@@ -45,6 +45,7 @@ type ConjurIamParams struct {
 `conjurIamClient.ConjurIamParams` must be provided when calling the NewConjurIamClient function. The parameters specify the method for AWS Role Assumption. Each AWS Role Assumption method has unique requirements.
 
 |Method|Short Description|Required ConjurIamParams|
+|--|--|--|
 |ec2role|Uses the role assigned to the host|IamAuthMethod|
 |assumerole|Attempts to use host defaults (e.g. Env, ~/.aws/credentials)|IamAuthMethod, RoleArn|
 |profile|Uses credentials assigned to the profile to assume role|IamAuthMethod, Profile, RoleArn|
