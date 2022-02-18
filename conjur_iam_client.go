@@ -3,11 +3,14 @@ package conjurIamClient
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -30,7 +33,7 @@ type Sigv4Payload struct {
 	Authorization     string `json:"authorization"`
 }
 
-type ConjurParams struct {
+type ConjurIamParams struct {
 	IamAuthMethod   string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile"
 	Profile         string // AWS Profile (e.g. Default)
 	RoleArn         string // AWS Role ARN (required for assumeRole)
@@ -38,79 +41,72 @@ type ConjurParams struct {
 	AccessKey       string // AWS Access Key (Required for static)
 	SecretKey       string // AWS Secret Key (Required for static)
 	SessionToken    string // AWS Session Token (Optional for static)
-	HostId          string // Host to Authenticate as e.g. host/policy/prefix/id
-	ServiceId       string // Authentication Service e.g. prod
 }
+
+type routerURL string
 
 // Set defaults as required by the aws-sdk-go-v2 package to obtain a Signed Token
 var (
 	xAmzContentSHA256 string = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	serviceID         string = "sts"
+	awsServiceID      string = "sts"
 	region            string = "us-east-1" // Region must be us-east-1 for the IAM Service Call
 )
 
-// NewClientIamClient requires a struct containing ConjurParameters.
+// NewConjurIamClient requires a struct containing specific Conjur IAM Parameters
 // Parameters specify the Credential Generation IamAuthMethodod as well as specific Conjur
-// Details.
+// Details. Examples usage in ./examples/
 // type ConjurParams struct {
-// 		IamAuthMethod       string // IAM IamAuthMethodod: "static", "iamrole", "assumerole", "profile" (Required)
+// 		IamAuthMethod       string // IAM IamAuthMethodod: "static", "ec2role", "assumerole", "profile" (Required)
 //		Profile      		string // AWS Profile (e.g. Default) (Required for Profile)
 // 		RoleArn      		string // AWS Role ARN (Required for assumeRole)
 //		Session      		string // AWS Assume Role Session Name (Required for assumeRole)
 //		AccessKey    		string // AWS Access Key (Required for static)
 //		SecretKey    		string // AWS Secret Key (Required for static)
 //		SessionToken 		string // AWS Session Token (Optional for static)
-//		HostId       		string // Host to Authenticate as e.g. host/policy/prefix/id (Required)
-//		ServiceId    		string // Authentication Service e.g. prod (Required)
 //	}
-func (p ConjurParams) NewConjurIamClient() (*conjurapi.Client, error) {
-	// Validate required parameters are present
-	if p.IamAuthMethod == "" || p.HostId == "" || p.ServiceId == "" {
-		err := fmt.Errorf("required parameter not provided - IamAuthMethod, HostId, and ServiceId are required")
-		panic(err)
+func (p ConjurIamParams) NewConjurIamClient() (*conjurapi.Client, error) {
+	// Validate IAM Authentication Method is present
+	if p.IamAuthMethod == "" {
+		panic(fmt.Errorf("required parameter not provided - IamAuthMethod, HostId, and ServiceId are required"))
 	}
 
 	// Obtain AWS based on context provided
 	credentials, err := getAwsCredentials(p)
 	if err != nil {
-		fmt.Printf("Error: %s", err)
-		panic(err)
+		return nil, err
 	}
 
 	// Get AWS Signature Version 4 signing token based on IAM Role
 	sigV4Payload, err := newTokenFromIAM(*credentials)
 	if err != nil {
-		fmt.Printf("Error: %s", err)
-		panic(err)
+		return nil, err
 	}
 
 	// Load Conjur Config - Checks .netrc, .conjurrc, and Environment Variables
 	cfg, err := conjurapi.LoadConfig()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	// Get Conjur Authentication Token
-	conjurSessionToken, err := getConjurIAMSessionToken(*sigV4Payload, cfg, p)
+	authnToken, err := getConjurIAMSessionToken(*sigV4Payload, cfg)
 	if err != nil {
-		fmt.Printf("Error: %s", err)
-		panic(err)
+		return nil, err
 	}
 
 	// Create Conjur Client from Authentication Token and Config
-	conjurClient, err := conjurapi.NewClientFromToken(cfg, string(conjurSessionToken.Raw()))
+	conjurClient, err := conjurapi.NewClientFromToken(cfg, string(authnToken.Raw()))
 	if err != nil {
-		fmt.Printf("Error: %s", err)
-		panic(err)
+		return nil, err
 	}
 
 	return conjurClient, nil
 }
 
-func getAwsCredentials(p ConjurParams) (*aws.Credentials, error) {
+func getAwsCredentials(p ConjurIamParams) (*aws.Credentials, error) {
 	iamAuthMethod := strings.ToLower(p.IamAuthMethod)
 
-	if iamAuthMethod == "iamrole" {
+	if iamAuthMethod == "ec2role" {
 		// Returns initialized Client using EC2 IMDS Client by default
 		provider := ec2rolecreds.New(func(options *ec2rolecreds.Options) {
 			config.WithRegion(region)
@@ -123,22 +119,31 @@ func getAwsCredentials(p ConjurParams) (*aws.Credentials, error) {
 		}
 
 		return &credentials, nil
+
 	} else if iamAuthMethod == "profile" || iamAuthMethod == "static" || iamAuthMethod == "assumerole" {
+		// Validate that a Role ARN is provided
+		if p.RoleArn == "" {
+			return nil, fmt.Errorf("Role Arn not provided - Role Arn is required for assumption")
+		}
+
 		// Create AWS Configuration based on "method" and "parameters"
-		// The methods - profile, static, and assumerole all require role
-		// assumption. Each method uses a specific set of credentials.
+		// The methods - profile, static, and assumerole all rely on AWS Role Assumption via the
+		// STS Service. Each method uses a specific set of credentials.
 		// Methods:
-		// 		static uses provided static credentials to attempt role assumption
-		// 		profile loads a specified profile and then attempts to assume the specified role
-		// 		assumerole attempts to use environment variables, default configs, or the host role to attempt specified role assumption
+		// -     static: uses provided static credentials to attempt role assumption (AKID, SECRET KEY ID, SESSION TOKEN)
+		// -    profile: loads a specified profile (e.g. Default) and then attempts to assume the specified role.
+		//               The profile should contain credentials for this use case.
+		// - assumerole: attempts to use environment variables, default configs, or the host role to attempt specified role assumption
 		cfg, err := p.getAwsConfig()
 		if err != nil {
 			return nil, err
 		}
+
 		// Create STS Client
 		c := sts.NewFromConfig(*cfg, func(options *sts.Options) {
 			config.WithRegion(region)
 		})
+
 		// Create STS Provider
 		provider := stscreds.NewAssumeRoleProvider(c, p.RoleArn)
 
@@ -147,19 +152,23 @@ func getAwsCredentials(p ConjurParams) (*aws.Credentials, error) {
 		if err != nil {
 			panic(err)
 		}
+
 		return &credentials, nil
+
 	} else {
 		// No match for method identified, return error
-		err := fmt.Errorf("incorrect method provided, method provided %s", p.IamAuthMethod)
-		return nil, err
+		return nil, fmt.Errorf("incorrect method provided, method provided %s", p.IamAuthMethod)
 	}
 }
 
 // getAwsConfig returns the appropriate AWS Configuration based on the method and parameters
 // provided.
-func (p *ConjurParams) getAwsConfig() (*aws.Config, error) {
+func (p *ConjurIamParams) getAwsConfig() (*aws.Config, error) {
 	switch strings.ToLower(p.IamAuthMethod) {
 	case "static":
+		if p.AccessKey == "" || p.SecretKey == "" {
+			return nil, fmt.Errorf("recieved static method for IAM Role Assumption but did not recieve AccessKey or SecretKey")
+		}
 		// Returns AWS Configuration based on provided static credentials
 		cfg, err := config.LoadDefaultConfig(context.Background(),
 			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(p.AccessKey, p.SecretKey, p.SessionToken)),
@@ -182,7 +191,7 @@ func (p *ConjurParams) getAwsConfig() (*aws.Config, error) {
 		cfg, err := config.LoadDefaultConfig(context.Background(),
 			config.WithSharedConfigProfile(p.Profile),
 			config.WithRegion(region))
-		if &err != nil {
+		if err != nil {
 			panic(err)
 		}
 		return &cfg, nil
@@ -214,7 +223,7 @@ func newTokenFromIAM(credentials aws.Credentials) (*Sigv4Payload, error) {
 
 	// Create Signer using aws-sdk-go-v2/aws/signer with blank payload
 	signer := v4.NewSigner()
-	err = signer.SignHTTP(context.Background(), credentials, req, xAmzContentSHA256, serviceID, region, time.Now().UTC(), func(o *v4.SignerOptions) {
+	err = signer.SignHTTP(context.Background(), credentials, req, xAmzContentSHA256, awsServiceID, region, time.Now().UTC(), func(o *v4.SignerOptions) {
 		o.DisableURIPathEscaping = false
 		o.LogSigning = true
 	})
@@ -237,48 +246,94 @@ func newTokenFromIAM(credentials aws.Credentials) (*Sigv4Payload, error) {
 
 // getConjurIAMSessionToken utilizes the Sigv4Payload as the the body to authenticate
 // via the authn-iam Conjur Authenticator
-func getConjurIAMSessionToken(conjurAuthPayload Sigv4Payload, cfg conjurapi.Config, p ConjurParams) (authn.AuthnToken, error) {
+func getConjurIAMSessionToken(conjurAuthPayload Sigv4Payload, cfg conjurapi.Config) (authn.AuthnToken, error) {
+	// Create Conjur authn-iam payload from AWS Signature v4 Signer
 	payload, err := json.Marshal(conjurAuthPayload)
 	if err != nil {
-		err = fmt.Errorf("error creating json payload body from AWS sigv4 signer response. Error: %s", err)
 		return nil, err
 	}
 
+	// Obtain Conjur authn-iam Service ID -
+	authnIamServiceID := os.Getenv("CONJUR_AUTHN_IAM_SERVICE_ID")
+	if authnIamServiceID == "" {
+		return nil, fmt.Errorf("environment Variable for CONJUR_AUTHN_IAM_SERVICE_ID not found")
+	}
+
+	// Retrieve Conjur Login from Env or .Netrc
+	var login string
+	if loginPair, err := conjurapi.LoginPairFromEnv(); err == nil && loginPair.Login != "" {
+		login = loginPair.Login
+	} else if loginPair, err := conjurapi.LoginPairFromNetRC(cfg); err == nil && loginPair.Login != "" {
+		login = loginPair.Login
+	} else {
+		return nil, fmt.Errorf("unable to detect Conjur Login Identity (e.g. host/policy/prefix/id)")
+	}
+
 	// Build Conjur URL (Path Escape required on HOST ID to convert / to %2F)
-	authUrl := cfg.ApplianceURL + "/authn-iam/" + p.ServiceId + "/" + cfg.Account + "/" + url.PathEscape(p.HostId) + "/authenticate"
+	authnIamUrl := makeRouterURL(cfg.ApplianceURL, "authn-iam", authnIamServiceID, cfg.Account, url.PathEscape(login), "authenticate").String()
 
 	// Generate Conjur Client
-	client := &http.Client{}
-	conjurReq, err := http.NewRequest("POST", authUrl, bytes.NewBuffer(payload))
+	var httpClient *http.Client
+	if cfg.IsHttps() {
+		cert, err := cfg.ReadSSLCert()
+		if err != nil {
+			return nil, err
+		}
+		httpClient, err = newHTTPSClient(cert)
+		if err != nil {
+			return nil, err
+		}
+
+	} else {
+		httpClient = &http.Client{Timeout: time.Second * 10}
+	}
+
+	req, err := http.NewRequest("POST", authnIamUrl, bytes.NewBuffer(payload))
 	if err != nil {
 		err = fmt.Errorf("error generating the conjur client request : %s", err)
 		return nil, err
 	}
-	conjurReq.Header.Add("Content-Type", "text/plain")
-	conjurReq.Header.Add("Accept", "*/*")
+	req.Header.Add("Content-Type", "text/plain")
+	req.Header.Add("Accept", "*/*")
 
-	resp, err := client.Do(conjurReq)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		err = fmt.Errorf("no response from Conjur Host")
-		return nil, err
-	} else if resp.StatusCode == 401 || resp.StatusCode == 404 {
-		err = fmt.Errorf("error 404 or 401: %s", resp.Status)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := ioutil.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		err := fmt.Errorf("unable to read Conjur Response Body : %s", err)
 		return nil, err
 	}
 
 	// Generate Conjur Authentication Token from Conjur Byte Response
-	conjurAuthToken, err := authn.NewToken(respBytes)
+	conjurAuthToken, err := authn.NewToken(body)
 	if err != nil {
 		err = fmt.Errorf("unable to generate Conjur Token from Conjur Byte Response. Error: %s", err)
 		return nil, err
 	}
 
 	return conjurAuthToken, nil
+}
+
+// NON Exported CONJURAPI Functions
+func newHTTPSClient(cert []byte) (*http.Client, error) {
+	pool := x509.NewCertPool()
+	ok := pool.AppendCertsFromPEM(cert)
+	if !ok {
+		return nil, fmt.Errorf("Can't append Conjur SSL cert")
+	}
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: pool},
+	}
+	return &http.Client{Transport: tr, Timeout: time.Second * 10}, nil
+}
+
+func makeRouterURL(components ...string) routerURL {
+	return routerURL(strings.Join(components, "/"))
+}
+
+func (url routerURL) String() string {
+	return string(url)
 }
