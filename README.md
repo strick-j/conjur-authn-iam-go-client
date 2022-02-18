@@ -4,7 +4,7 @@ A Golang package for generating a Conjur Client based via the [authn-iam authent
 
 ## Installation
 ```
-go get -u ggithub.com/strick-j/conjur-authn-iam-go-client
+go get -u github.com/strick-j/conjur-authn-iam-go-client
 ```
 
 ## Usage
